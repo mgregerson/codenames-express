@@ -10,50 +10,91 @@ const io = new Server(httpServer, {
   },
 });
 
-const players = {}; // Store connected players
-const redTeam = [];
-const blueTeam = [];
+const teams = {
+  red: {
+    players: [],
+    score: 0,
+  },
+  blue: {
+    players: [],
+    score: 0,
+  },
+};
+
+let guesses = [];
 
 io.on("connection", (socket) => {
   console.log("A user connected");
-  console.log(socket);
 
   // Handle player joining
-  socket.on("join", (playerName) => {
-    players[socket.id] = playerName;
-    console.log(`${playerName} joined the game`);
+  socket.on("join", (id) => {
+    console.log(`${id} joined the game`);
 
     // Notify all players about the new player
-    io.emit("playerJoined", playerName);
+    io.emit("playerJoined", id);
   });
 
   socket.on("joinTeam", (team, role, name) => {
-    if (team === "red") {
-      redTeam.push({ team, role, name, id: socket.id });
-      console.log(redTeam);
-    } else {
-      blueTeam.push({ team, role, name, id: socket.id });
-      console.log(blueTeam);
-    }
-    io.emit("teamUpdate", redTeam, blueTeam);
+    const teamData = teams[team];
+    teamData.players.push({ team, role, name, id: socket.id });
+    io.emit("teamUpdate", teams);
   });
 
-  // Handle player making a guess
-  socket.on("makeGuess", (guess) => {
-    // Validate the guess and update game state
+  // Handle player making a guess. Update the guesses array of objects:
+  // { word: "word", team: "red", guesses: 'red' | 'blue' }
 
-    // Notify all players about the guess
-    io.emit("guessMade", guess);
+  socket.on("makeGuess", (word, currTeam) => {
+    let chosenWord;
+
+    console.log("word in socket makeGuess", word);
+    console.log("guesses in socket makeGuess", guesses);
+
+    // Update the guesses array - if the word in guesses array matches the word, update that word.
+    for (let guess of guesses) {
+      if (guess.word === word) {
+        chosenWord = guess;
+        guess["guess"] = currTeam;
+        guess.selected = true;
+        break; // Stop iterating after finding the matching word
+      }
+    }
+
+    console.log(guesses, "GOTCHA GUESSES");
+
+    // Update the score for the current team
+    if (chosenWord.team === "blue") {
+      teams.blue.score += 1;
+      io.emit("updateSelected", chosenWord);
+      io.emit("guessMade", guesses, teams);
+    } else if (chosenWord.team === "red") {
+      teams.red.score += 1;
+      io.emit("updateSelected", chosenWord);
+      io.emit("guessMade", guesses, teams);
+    } else if (chosenWord.team === "death") {
+      io.emit("gameOver", currTeam);
+    } else if (chosenWord.team === "neutral") {
+      io.emit("updateSelected", chosenWord);
+      io.emit("guessMade", guesses, teams);
+    }
+  });
+
+  socket.on("startGame", (cards) => {
+    guesses.push(...cards);
+    io.emit("gameStarted", guesses);
   });
 
   // Handle player disconnecting
   socket.on("disconnect", () => {
-    const playerName = players[socket.id];
-    delete players[socket.id];
-    console.log(`${playerName} left the game`);
+    console.log("A user disconnected");
+    // Handle player disconnecting
+    Object.keys(teams).forEach((team) => {
+      const teamData = teams[team];
+      teamData.players = teamData.players.filter(
+        (player) => player.id !== socket.id
+      );
+    });
 
-    // Notify all players about the player leaving
-    io.emit("playerLeft", playerName);
+    io.emit("teamUpdate", teams);
   });
 });
 
